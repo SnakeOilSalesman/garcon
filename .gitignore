@@ -97,3 +97,13 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# PyCharm files
+.idea/
+
+# Flake8 configuration file
+.flake8
+
+# Temporary files for manual testing
+sandbox.py
+*_sandbox.py

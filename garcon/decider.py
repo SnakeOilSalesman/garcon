@@ -34,10 +34,17 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         self.activities = activity.find_workflow_activities(flow)
         self.task_list = flow.name
         self.on_exception = getattr(flow, 'on_exception', None)
-        super(DeciderWorker, self).__init__()
+
+        if hasattr(flow, 'region'):
+            self.region = flow.region
+            super(DeciderWorker, self).__init__(region=flow.region)
+            registerables = self.get_entities_with_region()
+        else:
+            super(DeciderWorker, self).__init__()
+            registerables = self.get_entities_without_region()
 
         if register:
-            self.register()
+            self.register(registerables)
 
     def get_history(self, poll):
         """Get all the history.
@@ -62,7 +69,6 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         # Remove all the events that are related to decisions and only.
         return [e for e in events if not e['eventType'].startswith('Decision')]
 
-
     def get_activity_states(self, history):
         """Get the activity states from the history.
 
@@ -78,20 +84,68 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
 
         return event.activity_states_from_events(history)
 
-    def register(self):
+    def register(self, registerables):
         """Register the Workflow on SWF.
 
         To work, SWF needs to have pre-registered the domain, the workflow,
         and the different activities, this method takes care of this part.
+
+        Args:
+            registerables (list): list of entities to be registered.
         """
 
-        registerables = []
-        registerables.append(swf.Domain(name=self.domain))
-        registerables.append(swf.WorkflowType(
+        for swf_entity in registerables:
+            try:
+                swf_entity.register()
+            except (SWFDomainAlreadyExistsError, SWFTypeAlreadyExistsError):
+                print(
+                    swf_entity.__class__.__name__, swf_entity.name,
+                    'already exists')
+
+    def get_entities_with_region(self):
+        """Get entities with specified region that need to be registered.
+
+        Returns:
+            registerables (list): list of entities to be registered.
+        """
+
+        workflow_domain = swf.Domain(name=self.domain, region=self.region)
+        versioned_workflow = swf.WorkflowType(
             domain=self.domain,
             name=self.task_list,
             version=self.version,
-            task_list=self.task_list))
+            task_list=self.task_list,
+            region=self.region)
+
+        registerables = [workflow_domain, versioned_workflow]
+
+        for current_activity in self.activities:
+            registerables.append(
+                swf.ActivityType(
+                    domain=self.domain,
+                    name=current_activity.name,
+                    version=self.version,
+                    task_list=current_activity.task_list,
+                    region=self.region
+                ))
+
+        return registerables
+
+    def get_entities_without_region(self):
+        """Get entities without specified region that need to be registered.
+
+        Returns:
+            registerables (list): list of entities to be registered.
+        """
+
+        workflow_domain = swf.Domain(name=self.domain)
+        versioned_workflow = swf.WorkflowType(
+            domain=self.domain,
+            name=self.task_list,
+            version=self.version,
+            task_list=self.task_list)
+
+        registerables = [workflow_domain, versioned_workflow]
 
         for current_activity in self.activities:
             registerables.append(
@@ -101,13 +155,7 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
                     version=self.version,
                     task_list=current_activity.task_list))
 
-        for swf_entity in registerables:
-            try:
-                swf_entity.register()
-            except (SWFDomainAlreadyExistsError, SWFTypeAlreadyExistsError):
-                print(
-                    swf_entity.__class__.__name__, swf_entity.name,
-                    'already exists')
+        return registerables
 
     def create_decisions_from_flow(self, decisions, activity_states, context):
         """Create the decisions from the flow.

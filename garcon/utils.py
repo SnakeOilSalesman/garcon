@@ -6,6 +6,8 @@ Utils
 
 import hashlib
 
+import boto
+
 
 def create_dictionary_key(dictionary):
     """Create a key that represents the content of the dictionary.
@@ -30,6 +32,7 @@ def create_dictionary_key(dictionary):
 
     return hashlib.sha1(key_parts.encode('utf-8')).hexdigest()
 
+
 def non_throttle_error(swf_response_error):
     """Activity Runner.
 
@@ -42,6 +45,7 @@ def non_throttle_error(swf_response_error):
     """
 
     return swf_response_error.error_code != 'ThrottlingException'
+
 
 def throttle_backoff_handler(details):
     """Callback to be used when a throttle backoff is invoked.
@@ -64,3 +68,21 @@ def throttle_backoff_handler(details):
         'Throttle Exception occurred on try {}. '
         'Sleeping for {} seconds'.format(
             details['tries'], details['wait']))
+
+
+def get_region_info(region):
+    """Get region's info from boto.
+
+    Args:
+        region (str): name of the region where Activity will be placed.
+
+    Returns:
+        Regioninfo: boto object with region info.
+    """
+
+    region_name = boto.config.get('SWF', 'region', region)
+
+    for reg in boto.swf.regions():
+        if reg.name == region_name:
+            return reg
+    return None
