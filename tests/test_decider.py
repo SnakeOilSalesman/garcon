@@ -19,6 +19,14 @@ def mock(monkeypatch):
             monkeypatch.setattr(base, 'register', MagicMock())
 
 
+@pytest.fixture
+def activities():
+    class Activity:
+        name = 'activity_name'
+        task_list = 'task_list'
+    return [Activity(), Activity()]
+
+
 def test_create_decider(monkeypatch):
     """Create a decider and check the behavior of the registration.
     """
@@ -31,6 +39,7 @@ def test_create_decider(monkeypatch):
     assert d.flow
     assert d.domain
     assert d.on_exception
+    assert d.region is None
 
     monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
     d = decider.DeciderWorker(example)
@@ -39,6 +48,97 @@ def test_create_decider(monkeypatch):
     monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
     dec = decider.DeciderWorker(example, register=False)
     assert not dec.register.called
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, 'get_entities_with_region', MagicMock())
+    dec = decider.DeciderWorker(example, register=False)
+    assert not dec.get_entities_with_region.called
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, 'get_entities_without_region', MagicMock())
+    dec = decider.DeciderWorker(example, register=False)
+    assert dec.get_entities_without_region.called
+
+
+def test_create_decider_with_region(monkeypatch):
+    """Create a decider with region and check the behavior of the registration.
+    """
+
+    mock(monkeypatch)
+    import tests.fixtures.flows.example_with_region as example
+
+    d = decider.DeciderWorker(example)
+    assert len(d.activities) == 4
+    assert d.flow
+    assert d.domain
+    assert d.on_exception
+    assert d.region
+
+    monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
+    d = decider.DeciderWorker(example)
+    assert d.register.called
+
+    monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
+    dec = decider.DeciderWorker(example, register=False)
+    assert not dec.register.called
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, 'get_entities_with_region', MagicMock())
+    dec = decider.DeciderWorker(example, register=False)
+    assert dec.get_entities_with_region.called
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, 'get_entities_without_region', MagicMock())
+    dec = decider.DeciderWorker(example, register=False)
+    assert not dec.get_entities_without_region.called
+
+
+def test_get_entities_with_region(monkeypatch, activities):
+    """Test get entities with region that needed to be registered..
+    """
+
+    mock(monkeypatch)
+    import tests.fixtures.flows.example_with_region as example
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+    d = decider.DeciderWorker(example)
+    d.version = 'version'
+    d.activities = activities
+
+    registrebales = d.get_entities_with_region()
+    assert isinstance(registrebales, list)
+
+    import boto.swf.layer2 as swf
+    assert isinstance(registrebales[0], swf.Domain)
+    assert isinstance(registrebales[1], swf.WorkflowType)
+
+    for index in range(2, len(registrebales)):
+        assert isinstance(registrebales[index], swf.ActivityType)
+
+
+def test_get_entities_witout_region(monkeypatch, activities):
+    """Test get entities without region that needed to be registered..
+    """
+
+    mock(monkeypatch)
+    from tests.fixtures.flows import example
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+    d = decider.DeciderWorker(example)
+    d.version = 'version'
+    d.activities = activities
+
+    registrebales = d.get_entities_with_region()
+    assert isinstance(registrebales, list)
+
+    import boto.swf.layer2 as swf
+    assert isinstance(registrebales[0], swf.Domain)
+    assert isinstance(registrebales[1], swf.WorkflowType)
+
+    for index in range(2, len(registrebales)):
+        assert isinstance(registrebales[index], swf.ActivityType)
 
 
 def test_get_history(monkeypatch):
