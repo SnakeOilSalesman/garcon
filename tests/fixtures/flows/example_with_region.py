@@ -8,7 +8,7 @@ from garcon import utils
 domain = 'dev'
 name = 'workflow_name'
 region = utils.get_region_info('us-west-2')
-create = activity.create(domain, name)
+create = activity.create(domain, name, region=region)
 
 activity_1 = create(
     name='activity_1',

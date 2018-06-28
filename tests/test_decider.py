@@ -10,6 +10,7 @@ import pytest
 from garcon import decider
 from garcon import activity
 from tests.fixtures import decider as decider_events
+from tests.fixtures import history as time_out_history
 
 
 def mock(monkeypatch):
@@ -24,6 +25,7 @@ def activities():
     class Activity:
         name = 'activity_name'
         task_list = 'task_list'
+        region = None
     return [Activity(), Activity()]
 
 
@@ -49,51 +51,32 @@ def test_create_decider(monkeypatch):
     dec = decider.DeciderWorker(example, register=False)
     assert not dec.register.called
 
+    monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
     monkeypatch.setattr(
-        decider.DeciderWorker, 'get_entities_with_region', MagicMock())
-    dec = decider.DeciderWorker(example, register=False)
-    assert not dec.get_entities_with_region.called
+        decider.DeciderWorker, 'get_registrable_entities', MagicMock())
 
-    monkeypatch.setattr(
-        decider.DeciderWorker, 'get_entities_without_region', MagicMock())
-    dec = decider.DeciderWorker(example, register=False)
-    assert dec.get_entities_without_region.called
+    dec = decider.DeciderWorker(example)
+    assert dec.register.called
+    assert dec.get_registrable_entities.called
 
 
-def test_create_decider_with_region(monkeypatch):
+def test_create_decider_with_faulty_region_passed(monkeypatch):
     """Create a decider with region and check the behavior of the registration.
     """
 
     mock(monkeypatch)
     import tests.fixtures.flows.example_with_region as example
+    monkeypatch.setattr(example, 'region', MagicMock(return_value=None))
 
     d = decider.DeciderWorker(example)
     assert len(d.activities) == 4
     assert d.flow
     assert d.domain
     assert d.on_exception
-    assert d.region
-
-    monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
-    d = decider.DeciderWorker(example)
-    assert d.register.called
-
-    monkeypatch.setattr(decider.DeciderWorker, 'register', MagicMock())
-    dec = decider.DeciderWorker(example, register=False)
-    assert not dec.register.called
-
-    monkeypatch.setattr(
-        decider.DeciderWorker, 'get_entities_with_region', MagicMock())
-    dec = decider.DeciderWorker(example, register=False)
-    assert dec.get_entities_with_region.called
-
-    monkeypatch.setattr(
-        decider.DeciderWorker, 'get_entities_without_region', MagicMock())
-    dec = decider.DeciderWorker(example, register=False)
-    assert not dec.get_entities_without_region.called
+    assert d.region is None
 
 
-def test_get_entities_with_region(monkeypatch, activities):
+def test_get_registrable_entities(monkeypatch, activities):
     """Test get entities with region that needed to be registered..
     """
 
@@ -106,7 +89,7 @@ def test_get_entities_with_region(monkeypatch, activities):
     d.version = 'version'
     d.activities = activities
 
-    registrebales = d.get_entities_with_region()
+    registrebales = d.get_registrable_entities()
     assert isinstance(registrebales, list)
 
     import boto.swf.layer2 as swf
@@ -117,8 +100,52 @@ def test_get_entities_with_region(monkeypatch, activities):
         assert isinstance(registrebales[index], swf.ActivityType)
 
 
-def test_get_entities_witout_region(monkeypatch, activities):
-    """Test get entities without region that needed to be registered..
+def test_check_activities_region(monkeypatch, activities):
+    """Test get entities with region that needed to be registered..
+    """
+
+    mock(monkeypatch)
+    import tests.fixtures.flows.example_with_region as example
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+
+    for entity in activities:
+        entity.region = example.region
+
+    d = decider.DeciderWorker(example)
+    d.flow = example
+    d.version = 'version'
+    d.region = example.region
+    d.activities = activities
+
+    result = d.activities_region_is_valid()
+    assert result == True
+
+
+def test_check_activities_region_fail(monkeypatch, activities):
+    """Test activities region validation.
+    """
+
+    mock(monkeypatch)
+    import tests.fixtures.flows.example_with_region as example
+
+    activities[0].region = example.region
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+    d = decider.DeciderWorker(example)
+    d.flow = example
+    d.version = 'version'
+    d.region = example.region
+    d.activities = activities
+
+    result = d.activities_region_is_valid()
+    assert result == False
+
+
+def test_is_failed_activity_critical(monkeypatch):
+    """Test failed activity validator behaviour.
     """
 
     mock(monkeypatch)
@@ -127,18 +154,82 @@ def test_get_entities_witout_region(monkeypatch, activities):
     monkeypatch.setattr(
         decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
     d = decider.DeciderWorker(example)
-    d.version = 'version'
-    d.activities = activities
+    d.critical = time_out_history.critical_activity_namelist
 
-    registrebales = d.get_entities_with_region()
-    assert isinstance(registrebales, list)
+    event = time_out_history.time_out_event
+    history = time_out_history.history
 
-    import boto.swf.layer2 as swf
-    assert isinstance(registrebales[0], swf.Domain)
-    assert isinstance(registrebales[1], swf.WorkflowType)
+    result = d.is_failed_activity_critical(event, history)
+    assert result == True
 
-    for index in range(2, len(registrebales)):
-        assert isinstance(registrebales[index], swf.ActivityType)
+
+def test_is_failed_activity_critical_fail(monkeypatch):
+    """Test failed activity validator behaviour in case of fail.
+    """
+
+    mock(monkeypatch)
+    from tests.fixtures.flows import example
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+    d = decider.DeciderWorker(example)
+    d.critical = []
+
+    event = time_out_history.time_out_event
+    history = time_out_history.history
+
+    result = d.is_failed_activity_critical(event, history)
+    assert result == False
+
+    d.critical = time_out_history.not_timed_out_activity
+    result = d.is_failed_activity_critical(event, history)
+    assert result == False
+
+
+def test_is_there_timed_out_activities(monkeypatch):
+    """Test timed out activities seeker behaviour.
+    """
+
+    mock(monkeypatch)
+    from tests.fixtures.flows import example
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+    monkeypatch.setattr(
+        decider.DeciderWorker, 'is_failed_activity_critical',
+        lambda self, *args, **kwargs: None)
+    d = decider.DeciderWorker(example)
+
+    history = time_out_history.history
+
+    result = d.is_there_timed_out_activities(history)
+    assert result is None
+
+
+def test_is_there_timed_out_activities_fail(monkeypatch):
+    """Test timed out activities seeker behaviour in case of fail.
+    """
+
+    mock(monkeypatch)
+    from tests.fixtures.flows import example
+
+    monkeypatch.setattr(
+        decider.DeciderWorker, '__init__', lambda self, *args, **kwargs: None)
+    monkeypatch.setattr(
+        decider.DeciderWorker, 'is_failed_activity_critical',
+        lambda self, *args, **kwargs: True)
+
+    d = decider.DeciderWorker(example)
+
+    monkeypatch.setattr(swf, 'Layer1Decisions', MagicMock())
+    monkeypatch.setattr(decider.DeciderWorker, 'complete', MagicMock())
+    history = time_out_history.history
+
+    with pytest.raises(Exception):
+        d.is_there_timed_out_activities(history)
+
+    assert d.complete.called
+    assert swf.Layer1Decisions.called
 
 
 def test_get_history(monkeypatch):

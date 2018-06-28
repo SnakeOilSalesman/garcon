@@ -17,6 +17,8 @@ from garcon import activity
 from garcon import event
 from garcon import log
 
+time_out_message = 'The activity with parameter fail_on_timeout has timed out.'
+
 
 class DeciderWorker(swf.Decider, log.GarconLogger):
 
@@ -35,16 +37,20 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         self.task_list = flow.name
         self.on_exception = getattr(flow, 'on_exception', None)
 
-        if hasattr(flow, 'region'):
-            self.region = flow.region
-            super(DeciderWorker, self).__init__(region=flow.region)
-            registerables = self.get_entities_with_region()
-        else:
-            super(DeciderWorker, self).__init__()
-            registerables = self.get_entities_without_region()
+        critical_list = [
+            single_activity.name for single_activity in self.activities
+            if single_activity.fail_on_timeout]
+
+        self.critical = critical_list
+
+        additional_args = dict()
+        if hasattr(flow, 'region') and self.activities_region_is_valid():
+            additional_args['region'] = self.region = flow.region
+        # Keep super class initialization after region info initialization.
+        super(DeciderWorker, self).__init__()
 
         if register:
-            self.register(registerables)
+            self.register(self.get_registrable_entities(**additional_args))
 
     def get_history(self, poll):
         """Get all the history.
@@ -102,60 +108,52 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
                     swf_entity.__class__.__name__, swf_entity.name,
                     'already exists')
 
-    def get_entities_with_region(self):
-        """Get entities with specified region that need to be registered.
+    def get_registrable_entities(self, **kwargs):
+        """Get entities without specified region that need to be registered.
 
         Returns:
-            registerables (list): list of entities to be registered.
+            registrables (list): list of entities to be registered.
         """
 
-        workflow_domain = swf.Domain(name=self.domain, region=self.region)
+        workflow_domain = swf.Domain(name=self.domain, **kwargs)
         versioned_workflow = swf.WorkflowType(
             domain=self.domain,
             name=self.task_list,
             version=self.version,
             task_list=self.task_list,
-            region=self.region)
+            **kwargs)
 
-        registerables = [workflow_domain, versioned_workflow]
+        registrables = [workflow_domain, versioned_workflow]
 
         for current_activity in self.activities:
-            registerables.append(
+            registrables.append(
                 swf.ActivityType(
                     domain=self.domain,
                     name=current_activity.name,
                     version=self.version,
                     task_list=current_activity.task_list,
-                    region=self.region
-                ))
+                    **kwargs))
 
-        return registerables
+        return registrables
 
-    def get_entities_without_region(self):
-        """Get entities without specified region that need to be registered.
+    def activities_region_is_valid(self):
+        """Check Activities Workers placement region.
+
+        Make sure that region info prepared for Activities Workers was passed
+        to the constructor. Otherwise Decider and Activities may be placed
+        in different regions and workflow will not start.
 
         Returns:
-            registerables (list): list of entities to be registered.
+            (bool): check result.
         """
 
-        workflow_domain = swf.Domain(name=self.domain)
-        versioned_workflow = swf.WorkflowType(
-            domain=self.domain,
-            name=self.task_list,
-            version=self.version,
-            task_list=self.task_list)
-
-        registerables = [workflow_domain, versioned_workflow]
-
-        for current_activity in self.activities:
-            registerables.append(
-                swf.ActivityType(
-                    domain=self.domain,
-                    name=current_activity.name,
-                    version=self.version,
-                    task_list=current_activity.task_list))
-
-        return registerables
+        for entity in self.activities:
+            if self.flow.region != entity.region:
+                print(
+                    'Warning! Region info is included in flow, but was not '
+                    'passed to Activities. Starting in Default Region.')
+                return False
+        return True
 
     def create_decisions_from_flow(self, decisions, activity_states, context):
         """Create the decisions from the flow.
@@ -277,6 +275,15 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         current_context = event.get_current_context(history)
         current_context.set_workflow_execution_info(poll, self.domain)
 
+        if self.critical:
+            try:
+                self.is_there_timed_out_activities(history)
+            except Exception as error:
+                if self.on_exception:
+                    self.on_exception(self, error)
+                self.logger.error(error, exc_info=True)
+                return True
+
         decisions = swf.Layer1Decisions()
         if not custom_decider:
             self.create_decisions_from_flow(
@@ -286,6 +293,50 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
                 decisions, custom_decider, activity_states, current_context)
         self.complete(decisions=decisions)
         return True
+
+    def is_there_timed_out_activities(self, history):
+        """Find timed out activities and check if they are critical.
+
+        Args:
+            history (list): list of events polled from AWS SWF.
+
+        Return:
+            boolean: return result of activity condition check.
+        """
+
+        for single_event in history[::-1]:
+            if single_event['eventType'] == 'ActivityTaskTimedOut' and (
+                    self.is_failed_activity_critical(single_event, history)):
+                print('activity timed out')
+                self.logger.error('activity timed out')
+
+                decision = swf.Layer1Decisions()
+                decision.fail_workflow_execution(reason=time_out_message)
+                self.complete(decisions=decision)
+                raise Exception(time_out_message)
+
+    def is_failed_activity_critical(self, time_out_event, history):
+        """Check if activity is on the list of failing on timeout activities.
+
+        Args:
+            time_out_event (dict): time out event from history.
+            history (list): list of events polled from AWS SWF.
+
+        Return:
+            boolean: return result of activity condition check.
+        """
+
+        target_id = (
+            time_out_event[
+                'activityTaskTimedOutEventAttributes']['scheduledEventId'])
+        for target_event in history[::-1]:
+            if target_id == target_event['eventId']:
+                activity_name = target_event[
+                    'activityTaskScheduledEventAttributes'][
+                    'activityType']['name']
+                if activity_name in self.critical:
+                    return True
+                return False
 
 
 class ScheduleContext:
