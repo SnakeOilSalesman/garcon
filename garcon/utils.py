@@ -6,6 +6,8 @@ Utils
 
 import hashlib
 
+import boto
+
 
 def create_dictionary_key(dictionary):
     """Create a key that represents the content of the dictionary.
@@ -64,3 +66,27 @@ def throttle_backoff_handler(details):
         'Throttle Exception occurred on try {}. '
         'Sleeping for {} seconds'.format(
             details['tries'], details['wait']))
+
+
+def get_region_info(region):
+    """Get region's info from boto.
+
+    boto.swf.layer1.Layer1 uses ready-to-use RegionInfo objects.
+    On initialization activity.create() will take this object and will
+    pass it to every Activity object, that it will create.
+    Activity objects will than initialize boto.swf.layer1.Layer1 objects
+    with this RegionInfo object.
+
+    Args:
+        region (str): name of the region where Activity will be placed.
+
+    Returns:
+        Regioninfo: boto object with region info.
+    """
+
+    region_name = boto.config.get('SWF', 'region', region)
+
+    for reg in boto.swf.regions():
+        if reg.name == region_name:
+            return reg
+    return None

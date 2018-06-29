@@ -308,6 +308,23 @@ def test_create_activity(monkeypatch):
     assert current_activity.domain == 'domain_name'
 
 
+def test_create_activity_with_region(monkeypatch):
+    """Test the creation of an activity via `create` inside specific region.
+    """
+
+    monkeypatch.setattr(
+        activity.Activity, '__init__', lambda self, **kwargs: None)
+    create = activity.create('domain_name', 'flow_name', region='region')
+
+    current_activity = create(name='activity_name')
+    assert isinstance(current_activity, activity.Activity)
+    assert current_activity.name == 'flow_name_activity_name'
+    assert current_activity.task_list == 'flow_name_activity_name'
+    assert current_activity.domain == 'domain_name'
+    # because of monkey patching region default value is intact.
+    assert current_activity.region is None
+
+
 def test_create_external_activity(monkeypatch):
     """Test the creation of an external activity via `create`.
     """

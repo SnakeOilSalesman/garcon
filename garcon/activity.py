@@ -564,7 +564,7 @@ def worker_runner(worker):
         continue
 
 
-def create(domain, name, version='1.0', on_exception=None):
+def create(domain, name, version='1.0', on_exception=None, region=None):
     """Helper method to create Activities.
 
     The helper method simplifies the creation of an activity by setting the
@@ -580,13 +580,14 @@ def create(domain, name, version='1.0', on_exception=None):
         name (str): name of the activity.
         version (str): activity version.
         on_exception (callable): the error handler.
+        region (str): name of the region where Activity will be placed.
 
     Return:
         callable: activity generator.
     """
 
     def wrapper(**options):
-        activity = Activity()
+        activity = Activity(region=region)
 
         if options.get('external'):
             activity = ExternalActivity(

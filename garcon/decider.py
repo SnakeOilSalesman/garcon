@@ -34,10 +34,15 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         self.activities = activity.find_workflow_activities(flow)
         self.task_list = flow.name
         self.on_exception = getattr(flow, 'on_exception', None)
+
+        additional_kwargs = dict()
+        if hasattr(flow, 'region') and self.activities_region_is_valid():
+            additional_kwargs['region'] = self.region = flow.region
+        # Keep Base class initialization after region info initialization.
         super(DeciderWorker, self).__init__()
 
         if register:
-            self.register()
+            self.register(self.get_registrable_entities(**additional_kwargs))
 
     def get_history(self, poll):
         """Get all the history.
@@ -62,7 +67,6 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         # Remove all the events that are related to decisions and only.
         return [e for e in events if not e['eventType'].startswith('Decision')]
 
-
     def get_activity_states(self, history):
         """Get the activity states from the history.
 
@@ -78,28 +82,15 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
 
         return event.activity_states_from_events(history)
 
-    def register(self):
+    def register(self, registerables):
         """Register the Workflow on SWF.
 
         To work, SWF needs to have pre-registered the domain, the workflow,
         and the different activities, this method takes care of this part.
+
+        Args:
++            registerables (list): list of entities to be registered.
         """
-
-        registerables = []
-        registerables.append(swf.Domain(name=self.domain))
-        registerables.append(swf.WorkflowType(
-            domain=self.domain,
-            name=self.task_list,
-            version=self.version,
-            task_list=self.task_list))
-
-        for current_activity in self.activities:
-            registerables.append(
-                swf.ActivityType(
-                    domain=self.domain,
-                    name=current_activity.name,
-                    version=self.version,
-                    task_list=current_activity.task_list))
 
         for swf_entity in registerables:
             try:
@@ -108,6 +99,53 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
                 print(
                     swf_entity.__class__.__name__, swf_entity.name,
                     'already exists')
+
+    def get_registrable_entities(self, **kwargs):
+        """Get entities without specified region that need to be registered.
+
+        Returns:
+            registrables (list): list of entities to be registered.
+        """
+
+        workflow_domain = swf.Domain(name=self.domain, **kwargs)
+        versioned_workflow = swf.WorkflowType(
+            domain=self.domain,
+            name=self.task_list,
+            version=self.version,
+            task_list=self.task_list,
+            **kwargs)
+
+        registrables = [workflow_domain, versioned_workflow]
+
+        for current_activity in self.activities:
+            registrables.append(
+                swf.ActivityType(
+                    domain=self.domain,
+                    name=current_activity.name,
+                    version=self.version,
+                    task_list=current_activity.task_list,
+                    **kwargs))
+
+        return registrables
+
+    def activities_region_is_valid(self):
+        """Check Activities Workers placement region.
+
+        Make sure that region info prepared for Activities Workers was passed
+        to the constructor. Otherwise Decider and Activities may be placed
+        in different regions and workflow will not start.
+
+        Returns:
+            (bool): check result.
+        """
+
+        for entity in self.activities:
+            if self.flow.region != entity.region:
+                print(
+                    'Warning! Region info is included in flow, but was not '
+                    'passed to Activities. Starting in Default Region.')
+                return False
+        return True
 
     def create_decisions_from_flow(self, decisions, activity_states, context):
         """Create the decisions from the flow.
