@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 domain = 'dev'
 name = 'workflow_sample'
-region = utils.get_region_info('us-west-2')
+region = utils.get_region_info('us-east-2')
 create = activity.create(domain, name, region=region)
 
 

@@ -7,7 +7,19 @@ Utils
 import hashlib
 
 import boto
+from boto.regioninfo import RegionInfo
+import boto.swf.layer1
 
+ADDITIONAL_REGIONS_ENDPOINTS = {
+    'us-east-2': 'swf.us-east-2.amazonaws.com',
+    'ap-northeast-2': 'swf.ap-northeast-2.amazonaws.com',
+    'ap-northeast-3': 'swf.ap-northeast-3.amazonaws.com',
+    'ap-south-1': 'swf.ap-south-1.amazonaws.com',
+    'ca-central-1': 'swf.ca-central-1.amazonaws.com',
+    'cn-northwest-1': 'swf.cn-northwest-1.amazonaws.com.cn',
+    'eu-west-2': 'swf.eu-west-2.amazonaws.com',
+    'eu-west-3': 'swf.eu-west-3.amazonaws.com'
+}
 
 def create_dictionary_key(dictionary):
     """Create a key that represents the content of the dictionary.
@@ -86,7 +98,18 @@ def get_region_info(region):
 
     region_name = boto.config.get('SWF', 'region', region)
 
-    for reg in boto.swf.regions():
+    region_info_collection = boto.swf.regions()
+    connection_cls = boto.swf.layer1.Layer1
+    for additional_region, endpoint in ADDITIONAL_REGIONS_ENDPOINTS.items():
+        region_info_collection.append(
+            RegionInfo(
+                name=additional_region,
+                endpoint=endpoint,
+                connection_cls=connection_cls
+            )
+        )
+
+    for reg in region_info_collection:
         if reg.name == region_name:
             return reg
     return None
