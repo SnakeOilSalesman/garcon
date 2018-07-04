@@ -2,10 +2,10 @@ try:
     from unittest.mock import MagicMock
 except:
     from mock import MagicMock
-import boto.exception as boto_exception
 import datetime
 import pytest
-import json
+
+import botocore.exceptions as boto_exception
 
 from garcon import utils
 
@@ -54,22 +54,27 @@ def test_non_throttle_error():
     """
 
     response_status = 400
-    response_reason = 'Bad Request'
-    reponse_body = (
-        '{"__type": "com.amazon.coral.availability#ThrottlingException",'
-        '"message": "Rate exceeded"}')
-    json_body = json.loads(reponse_body)
-    exception = boto_exception.SWFResponseError(
-        response_status, response_reason, body=json_body)
-    result = utils.non_throttle_error(exception)
+    response_reason = 'ThrottlingException'
+    exception = boto_exception.ClientError(
+        error_response={
+            'Error': {
+                'Code': response_status,
+                'Message': response_reason
+            },
+        },
+        operation_name='test_operation')
+
     assert not utils.non_throttle_error(exception)
 
-    reponse_body = (
-        '{"__type": "com.amazon.coral.availability#OtheException",'
-        '"message": "Rate exceeded"}')
-    json_body = json.loads(reponse_body)
-    exception = boto_exception.SWFResponseError(
-        response_status, response_reason, body=json_body)
+    response_reason = 'OtheException'
+    exception = boto_exception.ClientError(
+        error_response={
+            'Error': {
+                'Code': response_status,
+                'Message': response_reason
+            },
+        },
+        operation_name='test_operation')
     assert utils.non_throttle_error(exception)
 
 def test_throttle_backoff_handler():

@@ -14,7 +14,7 @@ from garcon import task
 from garcon import utils
 from tests.fixtures import decider
 
-import boto.exception as boto_exception
+import botocore.exceptions as boto_exception
 
 
 def activity_run(
@@ -83,16 +83,18 @@ def test_poll_for_activity_throttle_retry(monkeypatch, poll=poll):
     current_activity = activity_run(monkeypatch, poll)
 
     response_status = 400
-    response_reason = 'Bad Request'
-    reponse_body = (
-        '{"__type": "com.amazon.coral.availability#ThrottlingException",'
-        '"message": "Rate exceeded"}')
-    json_body = json.loads(reponse_body)
-    exception = boto_exception.SWFResponseError(
-        response_status, response_reason, body=json_body)
+    response_reason = 'ThrottlingException'
+    exception = boto_exception.ClientError(
+        error_response={
+            'Error': {
+                'Code': response_status,
+                'Message': response_reason
+            },
+        },
+        operation_name='test_operation')
     current_activity.poll.side_effect = exception
 
-    with pytest.raises(boto_exception.SWFResponseError):
+    with pytest.raises(boto_exception.ClientError):
         current_activity.poll_for_activity()
     assert current_activity.poll.call_count == 5
 

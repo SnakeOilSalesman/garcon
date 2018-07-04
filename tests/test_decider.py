@@ -3,19 +3,20 @@ try:
     from unittest.mock import MagicMock
 except:
     from mock import MagicMock
-import boto.swf.layer2 as swf
+# import boto.swf.layer2 as swf
 import json
 import pytest
 
-from garcon import decider
 from garcon import activity
+from garcon import decider
+from garcon import medium
+
 from tests.fixtures import decider as decider_events
 
-
 def mock(monkeypatch):
-    for base in [swf.Decider, swf.WorkflowType, swf.ActivityType, swf.Domain]:
+    for base in [medium.Decider, medium.ActivityWorker]:
         monkeypatch.setattr(base, '__init__', MagicMock(return_value=None))
-        if base is not swf.Decider:
+        if base is medium.Decider:
             monkeypatch.setattr(base, 'register', MagicMock())
 
 

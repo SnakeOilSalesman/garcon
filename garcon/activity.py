@@ -38,15 +38,15 @@ Create an activity::
 """
 
 import backoff
-import boto.exception as boto_exception
-import boto.swf.layer2 as swf
+from botocore.exceptions import ClientError
 import itertools
 import json
 import threading
 
 from garcon import log
-from garcon import utils
+from garcon import medium
 from garcon import runner
+from garcon import utils
 
 
 ACTIVITY_STANDBY = 0
@@ -243,13 +243,19 @@ class ActivityInstance:
         return activity_input
 
 
-class Activity(swf.ActivityWorker, log.GarconLogger):
+class Activity(medium.ActivityWorker, log.GarconLogger):
+
     version = '1.0'
-    task_list = None
+    requires = None
+    retry = None
+    on_exception = None
+    pool_size = None
+    runner = None
+    generators = None
 
     @backoff.on_exception(
         backoff.expo,
-        boto_exception.SWFResponseError,
+        ClientError,
         max_tries=5,
         giveup=utils.non_throttle_error,
         on_backoff=utils.throttle_backoff_handler,

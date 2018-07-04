@@ -30,18 +30,18 @@ def create_dictionary_key(dictionary):
 
     return hashlib.sha1(key_parts.encode('utf-8')).hexdigest()
 
-def non_throttle_error(swf_response_error):
+def non_throttle_error(swf_error):
     """Activity Runner.
 
     Determine whether SWF Exception was a throttle or a different error.
 
     Args:
-        error: boto.exception.SWFResponseError instance.
+        swf_error: botocore.exceptions.ClientError instance.
     Return:
-        bool: True if SWFResponseError was a throttle, False otherwise.
+        bool: True if ClientError was a throttle, False otherwise.
     """
 
-    return swf_response_error.error_code != 'ThrottlingException'
+    return swf_error.response['Error']['Message'] != 'ThrottlingException'
 
 def throttle_backoff_handler(details):
     """Callback to be used when a throttle backoff is invoked.

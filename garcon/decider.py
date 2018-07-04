@@ -7,18 +7,17 @@ The decider worker is focused on orchestrating which activity needs to be
 executed and when based on the flow procided.
 """
 
-from boto.swf.exceptions import SWFDomainAlreadyExistsError
-from boto.swf.exceptions import SWFTypeAlreadyExistsError
-import boto.swf.layer2 as swf
 import functools
 import json
 
 from garcon import activity
+from garcon import decisions_handler
 from garcon import event
 from garcon import log
+from garcon import medium
 
 
-class DeciderWorker(swf.Decider, log.GarconLogger):
+class DeciderWorker(medium.Decider, log.GarconLogger):
 
     def __init__(self, flow, register=True):
         """Initialize the Decider Worker.
@@ -62,7 +61,6 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         # Remove all the events that are related to decisions and only.
         return [e for e in events if not e['eventType'].startswith('Decision')]
 
-
     def get_activity_states(self, history):
         """Get the activity states from the history.
 
@@ -77,37 +75,6 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         """
 
         return event.activity_states_from_events(history)
-
-    def register(self):
-        """Register the Workflow on SWF.
-
-        To work, SWF needs to have pre-registered the domain, the workflow,
-        and the different activities, this method takes care of this part.
-        """
-
-        registerables = []
-        registerables.append(swf.Domain(name=self.domain))
-        registerables.append(swf.WorkflowType(
-            domain=self.domain,
-            name=self.task_list,
-            version=self.version,
-            task_list=self.task_list))
-
-        for current_activity in self.activities:
-            registerables.append(
-                swf.ActivityType(
-                    domain=self.domain,
-                    name=current_activity.name,
-                    version=self.version,
-                    task_list=current_activity.task_list))
-
-        for swf_entity in registerables:
-            try:
-                swf_entity.register()
-            except (SWFDomainAlreadyExistsError, SWFTypeAlreadyExistsError):
-                print(
-                    swf_entity.__class__.__name__, swf_entity.name,
-                    'already exists')
 
     def create_decisions_from_flow(self, decisions, activity_states, context):
         """Create the decisions from the flow.
@@ -219,6 +186,7 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
             self.logger.error(error, exc_info=True)
             return True
 
+        self.last_token = poll.get('taskToken')
         custom_decider = getattr(self.flow, 'decider', None)
 
         if 'events' not in poll:
@@ -229,7 +197,7 @@ class DeciderWorker(swf.Decider, log.GarconLogger):
         current_context = event.get_current_context(history)
         current_context.set_workflow_execution_info(poll, self.domain)
 
-        decisions = swf.Layer1Decisions()
+        decisions = decisions_handler.Decisions()
         if not custom_decider:
             self.create_decisions_from_flow(
                 decisions, activity_states, current_context)
