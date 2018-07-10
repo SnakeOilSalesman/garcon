@@ -37,16 +37,14 @@ Create an activity::
 
 """
 
-import backoff
-import boto.exception as boto_exception
-import boto.swf.layer2 as swf
 import itertools
 import json
 import threading
 
 from garcon import log
-from garcon import utils
 from garcon import runner
+from garcon import utils
+from garcon.boto_legacy import medium
 
 
 ACTIVITY_STANDBY = 0
@@ -243,32 +241,15 @@ class ActivityInstance:
         return activity_input
 
 
-class Activity(swf.ActivityWorker, log.GarconLogger):
+class Activity(medium.ActivityWorker, log.GarconLogger):
+
     version = '1.0'
-    task_list = None
-
-    @backoff.on_exception(
-        backoff.expo,
-        boto_exception.SWFResponseError,
-        max_tries=5,
-        giveup=utils.non_throttle_error,
-        on_backoff=utils.throttle_backoff_handler,
-        jitter=backoff.full_jitter)
-    def poll_for_activity(self, identity=None):
-        """Runs Activity Poll.
-
-        If a SWF throttling exception is raised during a poll, the poll will
-        be retried up to 5 times using exponential backoff algorithm.
-
-        Upgrading to boto3 would make this retry logic redundant.
-
-        Args:
-            identity (str): Identity of the worker making the request, which
-                is recorded in the ActivityTaskStarted event in the AWS
-                console. This enables diagnostic tracing when problems arise.
-        """
-
-        return self.poll(identity=identity)
+    requires = None
+    retry = None
+    on_exception = None
+    pool_size = None
+    runner = None
+    generators = None
 
     def run(self, identity=None):
         """Activity Runner.
@@ -286,7 +267,7 @@ class Activity(swf.ActivityWorker, log.GarconLogger):
         try:
             if identity:
                 self.logger.debug('Polling with {}'.format(identity))
-            activity_task = self.poll_for_activity(identity)
+            activity_task = self.poll(identity=identity)
         except Exception as error:
             # Catch exceptions raised during poll() to avoid an Activity thread
             # dying & worker daemon unable to process the affected Activity.
@@ -564,7 +545,7 @@ def worker_runner(worker):
         continue
 
 
-def create(domain, name, version='1.0', on_exception=None):
+def create(domain, name, version='1.0', on_exception=None, config=None):
     """Helper method to create Activities.
 
     The helper method simplifies the creation of an activity by setting the
@@ -586,7 +567,7 @@ def create(domain, name, version='1.0', on_exception=None):
     """
 
     def wrapper(**options):
-        activity = Activity()
+        activity = Activity(config=config or dict())
 
         if options.get('external'):
             activity = ExternalActivity(

@@ -14,8 +14,6 @@ from garcon import task
 from garcon import utils
 from tests.fixtures import decider
 
-import boto.exception as boto_exception
-
 
 def activity_run(
         monkeypatch, poll=None, complete=None, fail=None, execute=None):
@@ -62,72 +60,6 @@ def generators(request):
 @pytest.fixture
 def poll():
     return dict(activityId='something')
-
-
-def test_poll_for_activity(monkeypatch, poll=poll):
-    """Test that poll_for_activity successfully polls.
-    """
-
-    current_activity = activity_run(monkeypatch, poll)
-    current_activity.poll.return_value = 'foo'
-
-    activity_results = current_activity.poll_for_activity()
-    assert current_activity.poll.called
-    assert activity_results == 'foo'
-
-
-def test_poll_for_activity_throttle_retry(monkeypatch, poll=poll):
-    """Test that SWF throttles are retried during polling.
-    """
-
-    current_activity = activity_run(monkeypatch, poll)
-
-    response_status = 400
-    response_reason = 'Bad Request'
-    reponse_body = (
-        '{"__type": "com.amazon.coral.availability#ThrottlingException",'
-        '"message": "Rate exceeded"}')
-    json_body = json.loads(reponse_body)
-    exception = boto_exception.SWFResponseError(
-        response_status, response_reason, body=json_body)
-    current_activity.poll.side_effect = exception
-
-    with pytest.raises(boto_exception.SWFResponseError):
-        current_activity.poll_for_activity()
-    assert current_activity.poll.call_count == 5
-
-
-def test_poll_for_activity_error(monkeypatch, poll=poll):
-    """Test that non-throttle errors during poll are thrown.
-    """
-
-    current_activity = activity_run(monkeypatch, poll)
-
-    exception = Exception()
-    current_activity.poll.side_effect = exception
-
-    with pytest.raises(Exception):
-        current_activity.poll_for_activity()
-
-
-def test_poll_for_activity_identity(monkeypatch, poll=poll):
-    """Test that identity is passed to poll_for_activity.
-    """
-
-    current_activity = activity_run(monkeypatch, poll)
-
-    current_activity.poll_for_activity(identity='foo')
-    current_activity.poll.assert_called_with(identity='foo')
-
-
-def test_poll_for_activity_no_identity(monkeypatch, poll=poll):
-    """Test poll_for_activity works without identity passed as param.
-    """
-
-    current_activity = activity_run(monkeypatch, poll)
-
-    current_activity.poll_for_activity()
-    current_activity.poll.assert_called_with(identity=None)
 
 
 def test_run_activity(monkeypatch, poll):
@@ -298,7 +230,8 @@ def test_create_activity(monkeypatch):
     """Test the creation of an activity via `create`.
     """
 
-    monkeypatch.setattr(activity.Activity, '__init__', lambda self: None)
+    monkeypatch.setattr(
+        activity.Activity, '__init__', lambda self, **kwargs: None)
     create = activity.create('domain_name', 'flow_name')
 
     current_activity = create(name='activity_name')
@@ -312,7 +245,8 @@ def test_create_external_activity(monkeypatch):
     """Test the creation of an external activity via `create`.
     """
 
-    monkeypatch.setattr(activity.Activity, '__init__', lambda self: None)
+    monkeypatch.setattr(
+        activity.Activity, '__init__', lambda self, **kwargs: None)
     create = activity.create('domain_name', 'flow_name')
 
     current_activity = create(
@@ -335,7 +269,8 @@ def test_create_activity_worker(monkeypatch):
     """Test the creation of an activity worker.
     """
 
-    monkeypatch.setattr(activity.Activity, '__init__', lambda self: None)
+    monkeypatch.setattr(
+        activity.Activity, '__init__', lambda self, **kwargs: None)
     from tests.fixtures.flows import example
 
     worker = activity.ActivityWorker(example)

@@ -100,5 +100,5 @@ class ExecutionContext:
         attributes = activity_event['activityTaskCompletedEventAttributes']
         result = attributes.get('result')
 
-        if result:
+        if result and result != '"{}"':
             self.current.update(json.loads(result))
